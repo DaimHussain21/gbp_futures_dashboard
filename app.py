@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="GBP Futures Signal Dashboard", layout="wide")
 
@@ -22,7 +23,63 @@ period = st.sidebar.selectbox("Data period", ["3mo", "6mo", "1y", "2y"], index=1
 interval = st.sidebar.selectbox("Interval", ["1d", "1h"], index=0)
 
 macro_score = st.sidebar.slider("Manual Macro Score", -6, 6, 0)
-event_risk = st.sidebar.selectbox("Event Risk", ["Normal", "High Event Risk"])
+event_window_hours = st.sidebar.slider("Event Risk Window Hours", 1, 12, 3)
+
+# -----------------------------
+# Manual economic calendar
+# -----------------------------
+# IMPORTANT: update these dates/times to real upcoming events.
+# Use your local time, or be consistent and always use one timezone (e.g. New York time).
+events = [
+    {
+        "name": "US CPI",
+        "country": "US",
+        "impact": "High",
+        "time": "2026-08-13 08:30"
+    },
+    {
+        "name": "UK CPI",
+        "country": "UK",
+        "impact": "High",
+        "time": "2026-08-19 07:00"
+    },
+    {
+        "name": "FOMC Rate Decision",
+        "country": "US",
+        "impact": "High",
+        "time": "2026-09-16 14:00"
+    },
+    {
+        "name": "BoE Rate Decision",
+        "country": "UK",
+        "impact": "High",
+        "time": "2026-09-17 07:00"
+    }
+]
+
+def check_event_risk(events, window_hours):
+    now = datetime.now()
+    upcoming_events = []
+
+    for event in events:
+        event_time = datetime.strptime(event["time"], "%Y-%m-%d %H:%M")
+        hours_until = (event_time - now).total_seconds() / 3600
+
+        if 0 <= hours_until <= window_hours and event["impact"] == "High":
+            upcoming_events.append({
+                "Event": event["name"],
+                "Country": event["country"],
+                "Impact": event["impact"],
+                "Time": event["time"],
+                "Hours Until": round(hours_until, 2)
+            })
+
+    if len(upcoming_events) > 0:
+        return "High Event Risk", pd.DataFrame(upcoming_events)
+    else:
+        return "Normal", pd.DataFrame()
+
+event_risk, event_risk_table = check_event_risk(events, event_window_hours)
 
 # -----------------------------
 # Data download function
@@ -201,6 +258,19 @@ with col6:
 
 with col7:
     st.metric("Macro Score", macro_score)
+
+# -----------------------------
+# Event risk
+# -----------------------------
+st.subheader("Event Risk")
+
+st.write("Current Event Risk:", event_risk)
+
+if event_risk == "High Event Risk":
+    st.warning("High-impact economic event is near. Signal is blocked.")
+    st.dataframe(event_risk_table, use_container_width=True)
+else:
+    st.success("No high-impact event inside the selected risk window.")
 
 # -----------------------------
 # Chart
