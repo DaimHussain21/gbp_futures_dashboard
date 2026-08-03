@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 st.set_page_config(page_title="GBP Futures Signal Dashboard", layout="wide")
 
@@ -80,6 +81,19 @@ def check_event_risk(events, window_hours):
         return "Normal", pd.DataFrame()
 
 event_risk, event_risk_table = check_event_risk(events, event_window_hours)
+
+# -----------------------------
+# London Session Mode
+# -----------------------------
+st.sidebar.header("London Session Mode")
+
+use_london_session = st.sidebar.checkbox("Only trade London session", value=True)
+
+london_start_hour = st.sidebar.number_input("London Start Hour", min_value=0, max_value=23, value=8)
+london_start_minute = st.sidebar.number_input("London Start Minute", min_value=0, max_value=59, value=0)
+
+london_end_hour = st.sidebar.number_input("London End Hour", min_value=0, max_value=23, value=11)
+london_end_minute = st.sidebar.number_input("London End Minute", min_value=0, max_value=59, value=0)
 
 # -----------------------------
 # Data download function
@@ -202,11 +216,38 @@ def calculate_sentiment_score(dxy_data, spx_data, vix_data):
     return score, notes
 
 # -----------------------------
+# London session check
+# -----------------------------
+def check_london_session(start_hour, start_minute, end_hour, end_minute):
+    london_now = datetime.now(ZoneInfo("Europe/London"))
+
+    start_time = london_now.replace(
+        hour=start_hour,
+        minute=start_minute,
+        second=0,
+        microsecond=0
+    )
+
+    end_time = london_now.replace(
+        hour=end_hour,
+        minute=end_minute,
+        second=0,
+        microsecond=0
+    )
+
+    is_open = start_time <= london_now <= end_time
+
+    return is_open, london_now.strftime("%Y-%m-%d %H:%M:%S"), start_time.strftime("%H:%M"), end_time.strftime("%H:%M")
+
+# -----------------------------
 # Final signal
 # -----------------------------
-def get_final_signal(total_score, event_risk):
+def get_final_signal(total_score, event_risk, use_london_session, london_is_open):
     if event_risk == "High Event Risk":
         return "No Trade - Event Risk"
+
+    if use_london_session and not london_is_open:
+        return "No Trade - Outside London Session"
 
     if total_score >= 5:
         return "Bullish"
@@ -227,7 +268,15 @@ tech_score, tech_notes = calculate_technical_score(gbp_data)
 sentiment_score, sentiment_notes = calculate_sentiment_score(dxy_data, spx_data, vix_data)
 
 total_score = tech_score + sentiment_score + macro_score
-signal = get_final_signal(total_score, event_risk)
+
+london_is_open, london_time_now, london_start_text, london_end_text = check_london_session(
+    london_start_hour,
+    london_start_minute,
+    london_end_hour,
+    london_end_minute
+)
+
+signal = get_final_signal(total_score, event_risk, use_london_session, london_is_open)
 confidence = min(100, abs(total_score) * 10)
 
 # -----------------------------
@@ -271,6 +320,27 @@ if event_risk == "High Event Risk":
     st.dataframe(event_risk_table, use_container_width=True)
 else:
     st.success("No high-impact event inside the selected risk window.")
+
+# -----------------------------
+# London session status
+# -----------------------------
+st.subheader("London Session Status")
+
+session_col1, session_col2, session_col3 = st.columns(3)
+
+with session_col1:
+    st.metric("London Time", london_time_now)
+
+with session_col2:
+    st.metric("Trading Window", f"{london_start_text} - {london_end_text}")
+
+with session_col3:
+    st.metric("London Session", "Open" if london_is_open else "Closed")
+
+if use_london_session and not london_is_open:
+    st.warning("Outside your selected London trading window. Signal is blocked.")
+elif use_london_session and london_is_open:
+    st.success("London trading window is active.")
 
 # -----------------------------
 # Chart
